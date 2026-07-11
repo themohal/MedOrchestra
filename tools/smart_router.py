@@ -72,8 +72,11 @@ def route_message(
     extracted_documents: str,
     age: int | None,
     duration: str,
+    has_prior_report: bool = False,
 ) -> RouteDecision:
-    heuristic = _heuristic_route(prompt, transcript, uploaded_files, extracted_documents, age, duration)
+    heuristic = _heuristic_route(
+        prompt, transcript, uploaded_files, extracted_documents, age, duration, has_prior_report
+    )
     if os.getenv("SMART_ROUTER_MODE", "heuristic").lower() != "llm":
         return heuristic
 
@@ -102,6 +105,7 @@ def _heuristic_route(
     extracted_documents: str,
     age: int | None,
     duration: str,
+    has_prior_report: bool = False,
 ) -> RouteDecision:
     # Route on the CURRENT turn only. Using the full transcript/extracted_documents
     # here caused every follow-up (even "okay, thanks") to re-trigger the crew,
@@ -111,13 +115,7 @@ def _heuristic_route(
     has_files = bool(uploaded_files)
     has_images = any(Path(path).suffix.lower() in IMAGE_SUFFIXES for path in uploaded_files)
 
-    # Short acknowledgements / social replies never need analysis.
-    if not has_files and _is_acknowledgement(message_lower):
-        return RouteDecision(
-            route=Route.CHAT,
-            reason="Short acknowledgement or follow-up chat; no new analysis needed.",
-        )
-
+    # Emergency language always takes priority, regardless of conversation state.
     if any(term in message_lower for term in EMERGENCY_TERMS):
         return RouteDecision(
             route=Route.EMERGENCY,
@@ -125,6 +123,22 @@ def _heuristic_route(
             use_crew=True,
             use_vision=has_images,
             use_research=False,
+        )
+
+    # Once a case has been analyzed, any follow-up WITHOUT a new file is normal
+    # chat. The generated report and uploaded-file text remain in the transcript,
+    # so the chat reply can answer questions about the existing report.
+    if has_prior_report and not has_files:
+        return RouteDecision(
+            route=Route.CHAT,
+            reason="A report already exists and no new file was attached; answering from the existing report context.",
+        )
+
+    # Short acknowledgements / social replies never need analysis.
+    if not has_files and _is_acknowledgement(message_lower):
+        return RouteDecision(
+            route=Route.CHAT,
+            reason="Short acknowledgement or follow-up chat; no new analysis needed.",
         )
 
     asks_for_analysis = any(term in message_lower for term in ANALYSIS_TERMS)
@@ -206,10 +220,28 @@ def _llm_route(
         return None
 
 
-def generate_lite_chat_reply(prompt: str, transcript: str, missing_fields: list[str] | None = None) -> str:
+def generate_lite_chat_reply(
+    prompt: str,
+    transcript: str,
+    missing_fields: list[str] | None = None,
+    report_context: str = "",
+) -> str:
     if missing_fields:
         fields = ", ".join(missing_fields)
         return f"Before I analyze this safely, please share: {fields}."
+
+    system_content = (
+        "You are a cautious healthcare assistant. Do not diagnose. "
+        "Answer briefly and encourage professional care for serious symptoms."
+    )
+    if report_context:
+        system_content += (
+            " A specialist analysis report has already been generated for this "
+            "conversation (provided below). When the user asks about the report, "
+            "their results, the uploaded files, or next steps, answer using that "
+            "report context. Do not invent findings that are not in it.\n\n"
+            f"=== EXISTING REPORT CONTEXT ===\n{report_context[-6000:]}"
+        )
 
     try:
         from litellm import completion
@@ -217,13 +249,7 @@ def generate_lite_chat_reply(prompt: str, transcript: str, missing_fields: list[
         response = completion(
             model=os.getenv("LITELLM_CHAT_MODEL", "openai/gpt-4o-mini"),
             messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a cautious healthcare assistant. Do not diagnose. "
-                        "Answer briefly and encourage professional care for serious symptoms."
-                    ),
-                },
+                {"role": "system", "content": system_content},
                 {"role": "user", "content": f"Conversation:\n{transcript[-2500:]}\n\nLatest message:\n{prompt}"},
             ],
             temperature=0.2,
@@ -231,6 +257,12 @@ def generate_lite_chat_reply(prompt: str, transcript: str, missing_fields: list[
         )
         return response.choices[0].message.content
     except Exception:
+        if report_context:
+            return (
+                "I have the earlier analysis report in context, but the chat model is "
+                "currently unavailable. Please re-check your API key/configuration, or "
+                "download the PDF report above."
+            )
         return (
             "I can help collect symptoms, review uploaded reports, and prepare a specialist-agent summary. "
             "Describe the concern and attach any reports or images when you are ready."

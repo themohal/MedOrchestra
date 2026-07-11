@@ -39,6 +39,7 @@ def init_session_state() -> None:
     st.session_state.setdefault("processed_upload_names", set())
     st.session_state.setdefault("last_pdf", None)
     st.session_state.setdefault("last_case_id", None)
+    st.session_state.setdefault("last_report_text", "")
 
 
 def render_safety_notice() -> None:
@@ -123,10 +124,14 @@ def main() -> None:
             extracted_documents="\n\n".join(st.session_state.extracted_blocks),
             age=int(age),
             duration=duration,
+            has_prior_report=st.session_state.last_case_id is not None,
         )
 
         if decision.route == Route.CHAT or decision.route == Route.ASK_MISSING_INFO:
-            response = generate_lite_chat_reply(prompt, transcript, decision.missing_fields)
+            report_context = build_report_context()
+            response = generate_lite_chat_reply(
+                prompt, transcript, decision.missing_fields, report_context
+            )
             st.session_state.messages.append({"role": "assistant", "content": response})
             with st.chat_message("assistant"):
                 if processed_names:
@@ -178,6 +183,7 @@ def main() -> None:
 
         st.session_state.last_pdf = pdf_bytes
         st.session_state.last_case_id = case_id
+        st.session_state.last_report_text = _compose_report_context(result)
         st.session_state.messages.append({"role": "assistant", "content": result.final_report})
 
 
@@ -215,6 +221,26 @@ def process_chat_uploads(uploads) -> tuple[list[str], list]:
 def build_user_transcript() -> str:
     user_messages = [message["content"] for message in st.session_state.messages if message["role"] == "user"]
     return "\n\n".join(user_messages)
+
+
+def _compose_report_context(result) -> str:
+    """Flatten an analysis result into text the chat model can answer from later."""
+    parts = [f"FINAL REPORT:\n{result.final_report}"]
+    for name, content in result.specialist_opinions.items():
+        parts.append(f"{name.upper()} OPINION:\n{content}")
+    if result.research_summary:
+        parts.append(f"RESEARCH SUMMARY:\n{result.research_summary}")
+    return "\n\n".join(parts)
+
+
+def build_report_context() -> str:
+    """Combine the last generated report with extracted file text for chat grounding."""
+    parts = []
+    if st.session_state.get("last_report_text"):
+        parts.append(st.session_state.last_report_text)
+    if st.session_state.get("extracted_blocks"):
+        parts.append("UPLOADED FILE CONTENT:\n" + "\n\n".join(st.session_state.extracted_blocks))
+    return "\n\n".join(parts)
 
 
 def upload_key(upload) -> str:
