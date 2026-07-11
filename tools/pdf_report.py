@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from io import BytesIO
 
+from reportlab.lib import colors
+
 from agents.crew import AnalysisResult, CaseInput
 
 
 def build_report_pdf(case_id: int, case: CaseInput, result: AnalysisResult) -> bytes:
-    from reportlab.lib import colors
     from reportlab.lib.pagesizes import letter
     from reportlab.lib.styles import getSampleStyleSheet
     from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
