@@ -232,15 +232,20 @@ def generate_lite_chat_reply(
 
     system_content = (
         "You are a cautious healthcare assistant. Do not diagnose. "
-        "Answer briefly and encourage professional care for serious symptoms."
+        "Answer briefly and encourage professional care for serious symptoms. "
+        "Answer ONLY the user's latest question. Do not volunteer unrelated "
+        "information or summaries the user did not ask for."
     )
     if report_context:
         system_content += (
-            " A specialist analysis report has already been generated for this "
-            "conversation (provided below). When the user asks about the report, "
-            "their results, the uploaded files, or next steps, answer using that "
-            "report context. Do not invent findings that are not in it.\n\n"
-            f"=== EXISTING REPORT CONTEXT ===\n{report_context[-6000:]}"
+            " A specialist analysis report was generated earlier in this conversation "
+            "(included below for reference ONLY). Use it strictly to answer questions "
+            "that are explicitly about the report, the X-ray/image, lab results, the "
+            "uploaded files, or recommended next steps. If the user's question is NOT "
+            "about those things (for example small talk, their name, or a general "
+            "question), answer it directly and do NOT mention the report or its "
+            "findings at all. Never invent findings that are not in the report.\n\n"
+            f"=== REPORT CONTEXT (reference only) ===\n{report_context[-6000:]}"
         )
 
     try:
