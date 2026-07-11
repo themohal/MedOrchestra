@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Local app data
+data/uploads/
+data/cases.sqlite3
+data/*.sqlite3
+*.db
+*.sqlite
+*.sqlite3
+
+# Generated reports and user files
+reports/
+*.pdf
+*.png
+*.jpg
+*.jpeg
+
+# Logs and OS/editor files
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
