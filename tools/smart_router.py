@@ -42,6 +42,13 @@ ANALYSIS_TERMS = {
     "review",
     "check",
 }
+ACK_TERMS = {
+    "ok", "okay", "k", "kk", "great", "thanks", "thank you", "thankyou", "ty",
+    "cool", "nice", "got it", "gotcha", "understood", "sure", "fine", "good",
+    "great thanks", "okay great", "ok great", "okay thanks", "ok thanks",
+    "alright", "perfect", "awesome", "noted", "yes", "no", "yep", "nope", "yeah",
+}
+
 EMERGENCY_TERMS = {
     "chest pain",
     "shortness of breath",
@@ -74,6 +81,20 @@ def route_message(
     return llm_decision or heuristic
 
 
+def _is_acknowledgement(message_lower: str) -> bool:
+    """True for short social/acknowledgement replies that shouldn't trigger analysis."""
+    cleaned = message_lower.strip().strip(".!?, ")
+    if not cleaned:
+        return True
+    if cleaned in ACK_TERMS:
+        return True
+    # Short phrases (<= 4 words) with no analysis keyword are treated as chatter.
+    words = cleaned.split()
+    if len(words) <= 4 and not any(term in cleaned for term in ANALYSIS_TERMS):
+        return all(word in ACK_TERMS or len(word) <= 3 for word in words)
+    return False
+
+
 def _heuristic_route(
     prompt: str,
     transcript: str,
@@ -82,45 +103,54 @@ def _heuristic_route(
     age: int | None,
     duration: str,
 ) -> RouteDecision:
-    text = f"{prompt}\n{transcript}\n{extracted_documents}".lower()
+    # Route on the CURRENT turn only. Using the full transcript/extracted_documents
+    # here caused every follow-up (even "okay, thanks") to re-trigger the crew,
+    # because the accumulated history always looked like medical context.
+    message = prompt.strip()
+    message_lower = message.lower()
     has_files = bool(uploaded_files)
     has_images = any(Path(path).suffix.lower() in IMAGE_SUFFIXES for path in uploaded_files)
 
-    if any(term in text for term in EMERGENCY_TERMS):
+    # Short acknowledgements / social replies never need analysis.
+    if not has_files and _is_acknowledgement(message_lower):
+        return RouteDecision(
+            route=Route.CHAT,
+            reason="Short acknowledgement or follow-up chat; no new analysis needed.",
+        )
+
+    if any(term in message_lower for term in EMERGENCY_TERMS):
         return RouteDecision(
             route=Route.EMERGENCY,
-            reason="Potential emergency red-flag language detected.",
+            reason="Potential emergency red-flag language detected in this message.",
             use_crew=True,
             use_vision=has_images,
             use_research=False,
         )
 
-    missing_fields = []
-    if not age:
-        missing_fields.append("age")
-    if not duration:
-        missing_fields.append("symptom duration")
+    asks_for_analysis = any(term in message_lower for term in ANALYSIS_TERMS)
+    has_medical_context = len(message) > 40
 
-    asks_for_analysis = any(term in text for term in ANALYSIS_TERMS)
-    has_medical_context = len(text.strip()) > 40 or has_files
+    # Only run the full crew when this turn actually brings something to analyze:
+    # a new file, an explicit analysis request, or a substantive symptom description.
     if has_files or asks_for_analysis or has_medical_context:
+        missing_fields = []
+        if not age:
+            missing_fields.append("age")
+        if not duration:
+            missing_fields.append("symptom duration")
         return RouteDecision(
             route=Route.ANALYZE_CASE,
-            reason="The message includes enough medical context, an analysis request, or uploaded files.",
+            reason="This message includes a new file, an analysis request, or substantive medical context.",
             use_crew=True,
             use_vision=has_images,
             use_research=True,
             missing_fields=missing_fields,
         )
 
-    if missing_fields:
-        return RouteDecision(
-            route=Route.ASK_MISSING_INFO,
-            reason="The message is short and basic patient context is missing.",
-            missing_fields=missing_fields,
-        )
-
-    return RouteDecision(route=Route.CHAT, reason="General chat or clarification.")
+    return RouteDecision(
+        route=Route.CHAT,
+        reason="General chat or clarification; no new case details to analyze.",
+    )
 
 
 def _llm_route(
