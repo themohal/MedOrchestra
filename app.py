@@ -76,18 +76,20 @@ def main() -> None:
         medications = st.text_area("Current medications", placeholder="Name, dose, frequency if known")
         allergies = st.text_area("Allergies", placeholder="Medicine or food allergies")
 
+        if st.session_state.last_pdf and st.session_state.last_case_id:
+            st.header("Latest Report")
+            st.download_button(
+                "Download PDF report",
+                data=st.session_state.last_pdf,
+                file_name=f"medorchestra_case_{st.session_state.last_case_id}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+            )
+
     st.subheader("Medical Chat")
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
-
-    if st.session_state.last_pdf and st.session_state.last_case_id:
-        st.download_button(
-            "Download latest PDF report",
-            data=st.session_state.last_pdf,
-            file_name=f"medorchestra_case_{st.session_state.last_case_id}.pdf",
-            mime="application/pdf",
-        )
 
     submission = st.chat_input(
         "Describe symptoms, ask a follow-up question, or attach reports/images...",
