@@ -103,9 +103,10 @@ def main() -> None:
             st.markdown(user_content)
 
         processed_names = []
+        current_paths = []
         if submitted_files:
             with st.chat_message("assistant"):
-                processed_names = process_chat_uploads(submitted_files)
+                processed_names, current_paths = process_chat_uploads(submitted_files)
 
         transcript = build_user_transcript()
         if not transcript.strip() and not st.session_state.uploaded_paths:
@@ -118,7 +119,7 @@ def main() -> None:
         decision = route_message(
             prompt=prompt,
             transcript=transcript,
-            uploaded_files=[str(path) for path in st.session_state.uploaded_paths],
+            uploaded_files=[str(path) for path in current_paths],
             extracted_documents="\n\n".join(st.session_state.extracted_blocks),
             age=int(age),
             duration=duration,
@@ -150,7 +151,7 @@ def main() -> None:
                     medications=medications,
                     allergies=allergies,
                     extracted_documents="\n\n".join(st.session_state.extracted_blocks),
-                    uploaded_files=[str(path) for path in st.session_state.uploaded_paths],
+                    uploaded_files=[str(path) for path in current_paths],
                     created_at=datetime.utcnow().isoformat(timespec="seconds") + "Z",
                 )
                 status.write("Checking uploaded reports and images.")
@@ -180,16 +181,23 @@ def main() -> None:
         st.session_state.messages.append({"role": "assistant", "content": result.final_report})
 
 
-def process_chat_uploads(uploads) -> None:
+def process_chat_uploads(uploads) -> tuple[list[str], list]:
+    """Process files attached this turn.
+
+    Returns (attached_names, current_paths) for the CURRENT turn only. Extracted
+    text is also appended to st.session_state.extracted_blocks so earlier file
+    content stays available as conversation context for follow-up questions.
+    """
     if not uploads:
-        return []
+        return [], []
 
     new_uploads = [upload for upload in uploads if upload_key(upload) not in st.session_state.processed_upload_names]
     if not new_uploads:
-        return []
+        return [], []
 
     with st.status("Attaching files...", expanded=True) as status:
         attached = []
+        current_paths = []
         for upload in new_uploads:
             stored_path = save_uploaded_file(upload, UPLOAD_DIR)
             extracted = extract_upload_content(stored_path)
@@ -197,10 +205,11 @@ def process_chat_uploads(uploads) -> None:
             st.session_state.extracted_blocks.append(f"File: {upload.name}\n{extracted}")
             st.session_state.processed_upload_names.add(upload_key(upload))
             attached.append(upload.name)
+            current_paths.append(stored_path)
             status.write(f"Attached `{upload.name}`")
         status.update(label="Files attached.", state="complete")
 
-    return attached
+    return attached, current_paths
 
 
 def build_user_transcript() -> str:
