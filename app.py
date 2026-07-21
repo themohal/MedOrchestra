@@ -13,7 +13,34 @@ from tools.extractors import extract_upload_content
 from tools.file_store import save_uploaded_file
 from tools.pdf_report import build_report_pdf
 from tools.smart_router import Route, generate_lite_chat_reply, route_message
+from langsmith.integrations.otel import OtelSpanProcessor
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from openinference.instrumentation.crewai import CrewAIInstrumentor
+from openinference.instrumentation.openai import OpenAIInstrumentor
+import dotenv
+dotenv.load_dotenv()
+# 1. Fetch the absolute global provider that is already running
+# This avoids the "Overriding of current TracerProvider is not allowed" error.
+tracer_provider = trace.get_tracer_provider()
 
+# 2. Check if the LangSmith processor is already attached to prevent duplicates
+existing_processors = getattr(tracer_provider, "_active_span_processor", None)
+has_langsmith = False
+
+if hasattr(existing_processors, "span_processors"):
+    has_langsmith = any(
+        type(p).__name__ == "OtelSpanProcessor" 
+        for p in existing_processors.span_processors
+    )
+
+# 3. Safe attachment injection
+if not has_langsmith:
+    try:
+        tracer_provider.add_span_processor(OtelSpanProcessor())
+    except Exception as e:
+        print(f"Skipping span processor attachment: {e}")
+        
 
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "data" / "uploads"
