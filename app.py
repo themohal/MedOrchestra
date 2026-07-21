@@ -20,27 +20,18 @@ from openinference.instrumentation.crewai import CrewAIInstrumentor
 from openinference.instrumentation.openai import OpenAIInstrumentor
 import dotenv
 dotenv.load_dotenv()
-# 1. Fetch the absolute global provider that is already running
-# This avoids the "Overriding of current TracerProvider is not allowed" error.
+# Configure OpenTelemetry
 tracer_provider = trace.get_tracer_provider()
+if not isinstance(tracer_provider, TracerProvider):
+    tracer_provider = TracerProvider()
+    trace.set_tracer_provider(tracer_provider)
 
-# 2. Check if the LangSmith processor is already attached to prevent duplicates
-existing_processors = getattr(tracer_provider, "_active_span_processor", None)
-has_langsmith = False
+# Add OtelSpanProcessor to the tracer provider
+tracer_provider.add_span_processor(OtelSpanProcessor())
 
-if hasattr(existing_processors, "span_processors"):
-    has_langsmith = any(
-        type(p).__name__ == "OtelSpanProcessor" 
-        for p in existing_processors.span_processors
-    )
-
-# 3. Safe attachment injection
-if not has_langsmith:
-    try:
-        tracer_provider.add_span_processor(OtelSpanProcessor())
-    except Exception as e:
-        print(f"Skipping span processor attachment: {e}")
-        
+# Instrument CrewAI and OpenAI
+CrewAIInstrumentor().instrument()
+OpenAIInstrumentor().instrument()
 
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "data" / "uploads"
